@@ -65,54 +65,70 @@ func tickCmd(t time.Time) tea.Msg {
 	return tickMsg(t)
 }
 
+// handleKeyMsg handles key presses
+func handleKeyMsg(m *Model, msg tea.KeyMsg) {
+	switch msg.String() {
+	case "q":
+		switch m.mode {
+		case Focusing:
+			m.mode = Paused
+			m.startTime = time.Now()
+			m.progress.FullColor = breakColor
+		case Paused:
+			m.mode = Breaking
+			m.startTime = time.Now()
+		case Breaking:
+			m.quitting = true
+		}
+	case "ctrl+c":
+		m.quitting = true
+	default:
+		if m.mode == Paused {
+			m.mode = Breaking
+			m.startTime = time.Now()
+		}
+	}
+
+}
+
+func updateForm(m *Model, msg tea.Msg) tea.Cmd {
+	f, cmd := m.form.Update(msg)
+	m.form = f.(*huh.Form)
+	return cmd
+}
+
+func updateTimer(m *Model, cmds []tea.Cmd) []tea.Cmd {
+	if m.startTime.IsZero() {
+		m.startTime = time.Now()
+		m.focusTime = m.form.Get("focus").(time.Duration)
+		m.breakTime = m.form.Get("break").(time.Duration)
+		m.mode = Focusing
+		return append(cmds, tea.Tick(tickInterval, tickCmd))
+	}
+	return cmds
+}
+
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-
 	switch msg := msg.(type) {
 	case tickMsg:
 		cmds = append(cmds, tea.Tick(tickInterval, tickCmd))
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "q":
-			switch m.mode {
-			case Focusing:
-				m.mode = Paused
-				m.startTime = time.Now()
-				m.progress.FullColor = breakColor
-			case Paused:
-				m.mode = Breaking
-				m.startTime = time.Now()
-			case Breaking:
-				m.quitting = true
-				return m, tea.Quit
-			}
-		case "ctrl+c":
-			m.quitting = true
+		handleKeyMsg(&m, msg)
+		if m.quitting {
 			return m, tea.Quit
-		default:
-			if m.mode == Paused {
-				m.mode = Breaking
-				m.startTime = time.Now()
-			}
 		}
 	}
 
-	// Update form
-	f, cmd := m.form.Update(msg)
-	m.form = f.(*huh.Form)
+	cmd := updateForm(&m, msg)
 	cmds = append(cmds, cmd)
 	if m.form.State != huh.StateCompleted {
 		return m, tea.Batch(cmds...)
 	}
 
 	// Update timer
-	if m.startTime.IsZero() {
-		m.startTime = time.Now()
-		m.focusTime = m.form.Get("focus").(time.Duration)
-		m.breakTime = m.form.Get("break").(time.Duration)
-		m.mode = Focusing
-		cmds = append(cmds, tea.Tick(tickInterval, tickCmd))
-	}
+	cmds = updateTimer(&m, cmds)
 
 	switch m.mode {
 	case Focusing:
